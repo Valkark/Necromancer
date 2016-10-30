@@ -1,0 +1,88 @@
+using UnityEngine;
+
+[RequireComponent(typeof(NavMeshAgent))]
+[RequireComponent(typeof(ThirdPersonCharacter))]
+public class AICharacterControl: MonoBehaviour {
+
+    public NavMeshAgent agent { get; private set; }                 // the navmesh agent required for the path finding
+    public ThirdPersonCharacter character { get; private set; }     // the character we are controlling
+	public Transform target;										// target to aim for
+	public float targetChangeTolerance = 1;				            // distance to target before target can be changed
+	public Camera myCamera;
+
+	Vector3 targetPos;
+	Animator animator;
+	public AudioClip attackSound;
+	public bool repeatSound = true;
+
+	// Use this for initialization
+	void Start () {
+
+        // get the components on the object we need ( should not be null due to require component so no need to check )
+		agent     = GetComponentInChildren<NavMeshAgent>();
+		character = GetComponent<ThirdPersonCharacter>();
+		animator  = GetComponent<Animator>(); 
+
+	}
+	
+	// Update is called once per frame
+	void Update () {
+
+		if (target != null)
+		{
+			if (Input.GetMouseButtonDown (0)) {
+				Ray ray = myCamera.ScreenPointToRay(Input.mousePosition);
+				RaycastHit hit;
+				if (Physics.Raycast(ray, out hit)) {//out retorna o valor obrigatoriamente
+					target.position = hit.point + new Vector3(0, 0.5F, 0);
+				}
+
+				//Attack if mouse clicked in an enemy and it is close enough
+				if (hit.point != Vector3.zero)
+				{
+					if (hit.transform.tag == "enemy" && Vector3.Distance(hit.transform.position,this.transform.position) < 2)
+					{
+						animator.SetBool("OnAttack", true);
+					}
+					else
+					{
+						animator.SetBool("OnAttack", false);
+					}
+				}
+			}
+
+			if (animator.IsInTransition(0) && repeatSound
+			    && animator.GetAnimatorTransitionInfo(0).IsName("Grounded -> attack")){
+				repeatSound = false;
+				GetComponent<AudioSource>().PlayOneShot(attackSound);
+			}
+			else if (animator.IsInTransition(0) && !repeatSound
+			         && animator.GetAnimatorTransitionInfo(0).IsName("attack -> Grounded")){
+				repeatSound = true;
+			}
+
+	        // update the progress if the character has made it to the previous target
+			if ((target.position-targetPos).magnitude > targetChangeTolerance) {
+				targetPos = target.position;
+				agent.SetDestination(targetPos);
+			}
+
+	        // update the agents position 
+			agent.transform.position = transform.position;
+
+	        // use the values to move the character
+			character.Move( agent.desiredVelocity * 2, false, false, targetPos );
+
+		} else {
+
+			// We still need to call the character's move function, but we send zeros input as the move param.
+			character.Move ( Vector3.zero, false, false, transform.position + transform.forward * 100 );
+
+		}
+	}
+
+	public void SetTarget(Transform target)
+	{
+		this.target = target;
+	}
+}
