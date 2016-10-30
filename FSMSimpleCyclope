@@ -1,0 +1,226 @@
+using UnityEngine;
+public class FSMSimpleCyclope : MonoBehaviour {
+	
+	#region FSM States
+	public enum      FSMStates { Waypoints, Chasing, Attack, Stun};
+	public FSMStates state = FSMStates.Waypoints;
+	public NavMeshAgent agent { get; private set; }                 // the navmesh agent required for the path finding
+	public ThirdPersonCharacter character { get; private set; }     // the character we are controlling
+	#endregion
+	
+	#region Generic Variable
+	public  GameObject target;
+	public  float      speed;
+	public  float      rotSpeed;
+	private float      timer;
+	private Vector3    dir;
+	#endregion
+	
+	#region Wapypoints
+	public  Transform[] waypoints;
+	public  float       distanceToChangeWaypoint;
+	private int         currentWaypoint;
+	#endregion
+	
+	#region Chasing
+	public float distanceToStartChasing;
+	public float distanceToStopChasing;
+	public float distanceToAttack;
+	public float distanceToReturnChase;
+	#endregion
+	
+	#region Attacking
+	Animator attack;
+	public AudioClip attackSound;
+	public AudioClip rageSound;
+	bool repeatSound = true;
+	float attackTime = 1;
+	#endregion
+	
+	#region Stun
+	float timeStun = 5;
+	bool alreadyStun = false;
+	public AudioClip stunSound;
+	#endregion
+
+
+	
+	#region Unity Functions
+	public void Start() {
+		timer = 0;
+		currentWaypoint = 0;
+		agent = GetComponentInChildren<NavMeshAgent>();
+		character = GetComponent<ThirdPersonCharacter>();
+		attack = GetComponent<Animator>();
+	}
+	
+	
+	public void FixedUpdate() {
+		dir = target.transform.position - transform.position;
+		print(state);
+		
+		switch (state) {
+		case FSMStates.Waypoints: WaypointState(); break;
+		case FSMStates.Chasing:   ChaseState();    break;
+		case FSMStates.Attack:    AttackState();   break;
+		case FSMStates.Stun:      StunState();     break;
+			
+		default: print("BUG: state should never be on default clause"); break;
+		}
+	}
+	#endregion
+	
+	#region Wapypoints State
+	private void WaypointState() {
+		
+		if (GetComponent<RPGLifeBarCyclope>().lifeBar.fillAmount <= 0.5f && !alreadyStun){
+			state = FSMStates.Stun;
+			GetComponent<AudioSource>().PlayOneShot(stunSound);
+		}
+		// Check if target is in range to chase
+		else if (dir.magnitude <= distanceToStartChasing) {
+			state = FSMStates.Chasing;
+			GetComponent<AudioSource>().PlayOneShot(rageSound);
+			return;
+		}
+		
+		// Find the direction to the current waypoint,
+		//   rotate and move towards it
+		Vector3 wpDir         = waypoints[currentWaypoint].position - transform.position;
+		transform.rotation    = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(wpDir), Time.deltaTime * rotSpeed);
+		transform.eulerAngles = new Vector3(0, transform.eulerAngles.y, 0);
+		if (wpDir.sqrMagnitude <= distanceToChangeWaypoint) {
+			currentWaypoint++;
+			if (currentWaypoint >= waypoints.Length)
+				currentWaypoint = 0;
+			
+		} else
+			
+			agent.SetDestination(waypoints[currentWaypoint].position);
+
+			character.Move( agent.desiredVelocity, false, false, waypoints[currentWaypoint].position );
+			//GetComponent<Rigidbody>().MovePosition(transform.position + transform.forward * speed * Time.deltaTime);
+	}
+	#endregion
+	
+	#region Chasing State
+	private void ChaseState() {
+		
+		if (GetComponent<RPGLifeBarCyclope>().lifeBar.fillAmount <= 0.5f && !alreadyStun){
+			state = FSMStates.Stun;
+			GetComponent<AudioSource>().PlayOneShot(stunSound);
+			attack.SetBool("OnAttack01", false);
+			attack.SetBool("OnAttack02", false);
+			return;
+		}
+		// Check if target is close enough to shoot or fire
+		//   or if target is too far way, then return to Waypoints
+		else if (dir.magnitude > distanceToStopChasing) {
+			state = FSMStates.Waypoints;
+			attack.SetBool("OnAttack01", false);
+			attack.SetBool("OnAttack02", false);
+			return;
+		} else if (dir.magnitude <= distanceToAttack) {
+			timer = 0;
+			GetComponent<Rigidbody>().velocity = Vector3.zero;
+			state = FSMStates.Attack;
+			
+			int i;
+			i = Random.Range(0,3);
+			if (i >= 0 && i < 2){
+				attack.SetBool("OnAttack01", true);
+			}
+			else{
+				attack.SetBool("OnAttack02", true);
+			}
+
+		}
+		
+		transform.rotation    = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir), Time.deltaTime * rotSpeed);
+		transform.eulerAngles = new Vector3(0, transform.eulerAngles.y, 0);
+		
+		
+		agent.SetDestination(target.transform.position);
+
+		character.Move( agent.desiredVelocity * 2, false, false, target.transform.position );
+		//GetComponent<Rigidbody>().MovePosition(transform.position + transform.forward * speed * Time.deltaTime);
+	}
+	#endregion
+	
+	#region Attacking State
+	private void AttackState() {
+
+		transform.rotation    = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir), Time.deltaTime * rotSpeed);
+		transform.eulerAngles = new Vector3(0, transform.eulerAngles.y, 0);
+		timer += Time.deltaTime;
+		if (timer >= attackTime) {
+			timer = 0;
+			if (dir.sqrMagnitude > distanceToAttack && dir.sqrMagnitude <= distanceToReturnChase) {
+				state = FSMStates.Chasing;
+				attack.SetBool("OnAttack01", false);
+				attack.SetBool("OnAttack02", false);
+			}
+			else if (dir.sqrMagnitude > distanceToReturnChase) {
+				state = FSMStates.Waypoints;
+				attack.SetBool("OnAttack01", false);
+				attack.SetBool("OnAttack02", false);
+			}else if (dir.magnitude <= distanceToAttack){
+				
+				int i;
+				i = Random.Range(0,3);
+				if (i >= 0 && i < 1){
+					attack.SetBool("OnAttack01", true);
+				}
+				else{
+					attack.SetBool("OnAttack02", true);
+				}
+				
+				if (attack.IsInTransition(0) && repeatSound
+				    && (attack.GetAnimatorTransitionInfo(0).IsName("Grounded -> Attack01") || 
+				    attack.GetAnimatorTransitionInfo(0).IsName("Grounded -> Attack02"))){
+					repeatSound = false;
+				}
+				else if (attack.IsInTransition(0) && !repeatSound
+				         && (attack.GetAnimatorTransitionInfo(0).IsName("Attack01 -> Grounded") ||
+				    attack.GetAnimatorTransitionInfo(0).IsName("Attack02 -> Grounded"))){
+					repeatSound = true;
+				}
+				
+			}
+		}
+		
+		if (GetComponent<RPGLifeBarCyclope>().lifeBar.fillAmount <= 0.5f && !alreadyStun){
+
+			state = FSMStates.Stun;
+			attack.SetBool("OnAttack01", false);
+			attack.SetBool("OnAttack02", false);
+			GetComponent<AudioSource>().PlayOneShot(stunSound);
+			return;
+		}
+	}
+	#endregion
+	
+	#region Stun State
+	private void StunState() {
+		attack.SetBool("IsStun", true);
+		alreadyStun = true;
+
+		timeStun -= Time.deltaTime;
+
+		print (timeStun);
+
+		if(timeStun < 0){
+			state = FSMStates.Chasing;
+			attack.SetBool("IsStun", false);
+			GetComponent<AudioSource>().Stop();
+			return;
+		}
+	}
+	#endregion
+
+	void OnCollisionEnter(Collision hit){
+		if (hit.transform.tag == "energy" && state == FSMStates.Waypoints) {
+			state = FSMStates.Chasing;
+		}
+	}
+}
